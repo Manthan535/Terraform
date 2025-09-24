@@ -1,0 +1,151 @@
+####  Basic Installation and Create Simple VM in azure #######
+
+
+Step 1: Install Terraform
+
+If you haven’t already:
+
+sudo wget https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
+sudo unzip terraform_1.9.8_linux_amd64.zip
+sudo mv terraform /usr/local/bin/
+terraform -v
+
+Step 2: Install Azure CLI
+
+For RHEL/CentOS/Rocky:
+
+sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
+
+sudo dnf install -y https://packages.microsoft.com/config/rhel/9.0/packages-microsoft-prod.rpm
+
+# Install Azure CLI
+sudo dnf install -y azure-cli
+
+# Login
+az login
+
+
+Follow the device login URL and code.
+
+Step 3: Set Subscription
+
+If you have multiple subscriptions:
+
+az account list --output table   # List all subscriptions
+az account set --subscription "YOUR_SUBSCRIPTION_ID"   # Set the one you want to use
+
+Step 4: Create a Terraform Project
+mkdir terraform-azure-vm
+cd terraform-azure-vm
+
+Step 5: Create main.tf
+
+This is a minimal working example to create a Linux VM with public IP:
+
+provider "azurerm" {
+  features {}
+  subscription_id = "Enter_subscription" 
+  tenant_id       = "enter tenant_id"       
+}
+
+resource "azurerm_resource_group" "rg" {
+  name     = "myResourceGroup"
+  location = "East US"
+}
+
+resource "azurerm_linux_virtual_machine" "vm" {
+  name                = "myLinuxVM"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  size                = "Standard_B1s"
+  admin_username      = "azureuser"
+
+  network_interface_ids = [
+    azurerm_network_interface.nic.id
+  ]
+
+  admin_ssh_key {
+    username   = "azureuser"
+    public_key = file("~/.ssh/id_rsa.pub")
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-focal"
+    sku       = "20_04-lts"
+    version   = "latest"
+  }
+}
+
+resource "azurerm_virtual_network" "vnet" {
+  name                = "myVnet"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  address_space       = ["10.0.0.0/16"]
+}
+
+resource "azurerm_subnet" "subnet" {
+  name                 = "mySubnet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.0.1.0/24"]
+}
+
+resource "azurerm_public_ip" "publicip" {
+  name                = "myPublicIP"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Static"      # <-- Must be Static for Standard SKU
+  sku                 = "Standard"    # Optional, but explicit
+}
+
+
+resource "azurerm_network_interface" "nic" {
+  name                = "myNIC"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.subnet.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.publicip.id
+  }
+}
+
+output "vm_public_ip" {
+  value = azurerm_public_ip.publicip.ip_address
+}
+
+
+Step 6: Initialize Terraform
+terraform init
+
+
+Step 7: Preview Plan
+terraform plan
+
+Step 8: Apply Configuration
+terraform apply -auto-approve
+
+
+Creates resource group, VNet, subnet, NIC, public IP, and Linux VM.
+
+Wait ~3–5 minutes.
+
+Step 9: SSH into VM
+
+Get the public IP from Terraform output:
+
+ssh azureuser@<vm_public_ip>
+
+Step 10: Clean Up
+terraform destroy -auto-approve
+
+
+Deletes all resources created by Terraform.
